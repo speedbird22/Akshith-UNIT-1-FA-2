@@ -3,10 +3,10 @@ import torch
 from PIL import Image
 import pandas as pd
 
-# Load your trained YOLOv5 model from torch hub cache
-model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', source='local', force_reload=True)
+# Load YOLOv5 model from GitHub
+model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', source='github')
 
-# Map detected classes to compliance categories
+# Compliance mapping for 10 classes
 compliance_map = {
     'Hardhat': '✅ Compliant',
     'Safety Vest': '✅ Compliant',
@@ -20,8 +20,8 @@ compliance_map = {
     'Safety Cone': '🟠 Cone'
 }
 
-# Streamlit UI
-st.set_page_config(page_title="Construction PPE Dashboard", layout="wide")
+# Streamlit UI setup
+st.set_page_config(page_title="Construction PPE Dashboard", page_icon="👷", layout="centered")
 st.markdown("<h1 style='text-align: center;'>👷 Construction Site PPE Compliance</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Upload an image to detect workers and assess safety compliance.</p>", unsafe_allow_html=True)
 
