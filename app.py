@@ -1,30 +1,31 @@
 import streamlit as st
-import torch
+from ultralytics import YOLO
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
 
-# Load YOLOv5 model
-model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', force_reload=True)
+# Load model
+model = YOLO("best.pt")
 
 # Class categories (must match your training)
 CLASSES = ['Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest',
            'Person', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle']
 
 # Compliance logic
-def assess_compliance(detections):
+def assess_compliance(results):
+    df = results.pandas().xyxy[0]
     summary = {"total": 0, "compliant": 0, "partial": 0, "non_compliant": 0}
     alerts = []
 
-    persons = detections[detections['name'] == 'Person']
+    persons = df[df['name'] == 'Person']
     summary["total"] = len(persons)
 
     for _, person in persons.iterrows():
         x1, y1, x2, y2 = person[['xmin', 'ymin', 'xmax', 'ymax']]
-        ppe_items = detections[
-            (detections['xmin'] > x1) & (detections['xmax'] < x2) &
-            (detections['ymin'] > y1) & (detections['ymax'] < y2)
+        ppe_items = df[
+            (df['xmin'] > x1) & (df['xmax'] < x2) &
+            (df['ymin'] > y1) & (df['ymax'] < y2)
         ]['name'].tolist()
 
         if all(p in ppe_items for p in ['Hardhat', 'Mask', 'Safety Vest']):
@@ -36,7 +37,7 @@ def assess_compliance(detections):
             summary["non_compliant"] += 1
             alerts.append("❌ Worker without PPE detected.")
 
-    return summary, alerts
+    return summary, alerts, df
 
 # Streamlit UI
 st.set_page_config(page_title="PPE Compliance Dashboard", layout="wide")
@@ -51,10 +52,7 @@ if uploaded_file:
 
     # Run YOLOv5 inference
     results = model(image)
-    detections = results.pandas().xyxy[0]
-
-    # Compliance analysis
-    summary, alerts = assess_compliance(detections)
+    summary, alerts, detections = assess_compliance(results)
 
     # Display summary
     st.subheader("Detection Summary")
