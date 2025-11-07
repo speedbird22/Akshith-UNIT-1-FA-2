@@ -2,6 +2,6 @@ streamlit
 torch
 Pillow
 ultralytics
-opencv-python
+opencv-python-headless
 tqdm
 seaborn
