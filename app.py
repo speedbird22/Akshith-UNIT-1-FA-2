@@ -3,8 +3,8 @@ import torch
 from PIL import Image
 import pandas as pd
 
-# Load your trained YOLOv5 model
-model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', force_reload=True)
+# Load your trained YOLOv5 model from torch hub cache
+model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', source='local', force_reload=True)
 
 # Map detected classes to compliance categories
 compliance_map = {
@@ -22,44 +22,47 @@ compliance_map = {
 
 # Streamlit UI
 st.set_page_config(page_title="Construction PPE Dashboard", layout="wide")
-st.title("👷 Construction Site PPE Compliance")
-st.markdown("Upload an image to detect workers and assess safety compliance.")
+st.markdown("<h1 style='text-align: center;'>👷 Construction Site PPE Compliance</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center;'>Upload an image to detect workers and assess safety compliance.</p>", unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+    st.image(image, caption="📷 Uploaded Image", use_column_width=True)
 
     # Run inference
     results = model(image)
     detections = results.pandas().xyxy[0]
 
-    # Extract top detection
     if not detections.empty:
         top = detections.iloc[0]
         label = top['name']
         conf = round(top['confidence'] * 100, 2)
         category = compliance_map.get(label, 'Unknown')
 
-        # Display result
-        st.subheader("Top Detection")
-        st.success(f"Detected: {label}")
-        st.info(f"Confidence: {conf}%")
+        st.markdown("### 🧾 Top Detection")
+        st.success(f"**Detected:** {label}")
+        st.info(f"**Confidence:** {conf}%")
         if category.startswith("✅"):
-            st.success(f"Compliance: {category}")
+            st.success(f"**Compliance:** {category}")
         elif category.startswith("❌"):
-            st.warning(f"Violation: {category}")
+            st.warning(f"**Violation:** {category}")
         else:
-            st.info(f"Category: {category}")
+            st.info(f"**Category:** {category}")
 
-    # Show full detection table
-    st.subheader("All Detections")
-    st.dataframe(detections)
+        # Show full detection table
+        st.markdown("### 📋 All Detections")
+        st.dataframe(detections[['name', 'confidence', 'class']])
 
-    # Compliance summary
-    st.subheader("Compliance Summary")
-    summary = detections['name'].value_counts().to_dict()
-    for cls, count in summary.items():
-        label = compliance_map.get(cls, cls)
-        st.write(f"- {label}: {count}")
+        # Compliance summary
+        st.markdown("### 📊 Compliance Summary")
+        summary = detections['name'].value_counts().to_dict()
+        for cls, count in summary.items():
+            label = compliance_map.get(cls, cls)
+            st.write(f"- {label}: {count}")
+    else:
+        st.error("🚫 No PPE-related objects detected. Try another image.")
+
+st.markdown("---")
+st.markdown("<p style='text-align: center; font-size: 12px;'>Built with ❤️ using YOLOv5 and Streamlit</p>", unsafe_allow_html=True)
