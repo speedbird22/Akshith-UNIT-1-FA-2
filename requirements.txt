@@ -1,0 +1,7 @@
+streamlit
+torch
+Pillow
+ultralytics
+opencv-python-headless
+tqdm
+seaborn
