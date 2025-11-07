@@ -1,17 +1,28 @@
 import streamlit as st
 import torch
-import pandas as pd
-import matplotlib.pyplot as plt
 from PIL import Image
-import numpy as np
+import pandas as pd
 
-# Load model manually
-model = torch.load("best.pt", map_location=torch.device("cpu"))
-model.eval()
+# Load your trained YOLOv5 model
+model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', force_reload=True)
+
+# Map detected classes to compliance categories
+compliance_map = {
+    'Hardhat': '✅ Compliant',
+    'Safety Vest': '✅ Compliant',
+    'Mask': '✅ Compliant',
+    'NO-Hardhat': '❌ Missing Hardhat',
+    'NO-Safety Vest': '❌ Missing Vest',
+    'NO-Mask': '❌ Missing Mask',
+    'Person': '👤 Worker',
+    'machinery': '⚙️ Machinery',
+    'vehicle': '🚗 Vehicle',
+    'Safety Cone': '🟠 Cone'
+}
 
 # Streamlit UI
-st.set_page_config(page_title="PPE Compliance Dashboard", layout="wide")
-st.title("👷 PPE Compliance Dashboard")
+st.set_page_config(page_title="Construction PPE Dashboard", layout="wide")
+st.title("👷 Construction Site PPE Compliance")
 st.markdown("Upload an image to detect workers and assess safety compliance.")
 
 uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
@@ -20,19 +31,35 @@ if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # Convert to tensor
-    img = np.array(image)
-    img = img[:, :, ::-1]  # RGB to BGR
-    img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
-    img = img.unsqueeze(0)
-
     # Run inference
-    with torch.no_grad():
-        results = model(img)
+    results = model(image)
+    detections = results.pandas().xyxy[0]
 
-    # Parse results (you may need to adjust this based on your model's output format)
-    # For now, just show raw tensor
-    st.subheader("Raw Detection Output")
-    st.write(results)
+    # Extract top detection
+    if not detections.empty:
+        top = detections.iloc[0]
+        label = top['name']
+        conf = round(top['confidence'] * 100, 2)
+        category = compliance_map.get(label, 'Unknown')
 
-    st.warning("⚠️ This version skips compliance logic and bounding boxes. Let me know if you want a custom parser.")
+        # Display result
+        st.subheader("Top Detection")
+        st.success(f"Detected: {label}")
+        st.info(f"Confidence: {conf}%")
+        if category.startswith("✅"):
+            st.success(f"Compliance: {category}")
+        elif category.startswith("❌"):
+            st.warning(f"Violation: {category}")
+        else:
+            st.info(f"Category: {category}")
+
+    # Show full detection table
+    st.subheader("All Detections")
+    st.dataframe(detections)
+
+    # Compliance summary
+    st.subheader("Compliance Summary")
+    summary = detections['name'].value_counts().to_dict()
+    for cls, count in summary.items():
+        label = compliance_map.get(cls, cls)
+        st.write(f"- {label}: {count}")
