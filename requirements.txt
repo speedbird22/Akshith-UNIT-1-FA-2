@@ -1,6 +1,5 @@
 streamlit
 torch
+opencv-python
 Pillow
-matplotlib
 pandas
-numpy
