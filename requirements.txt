@@ -1,8 +1,5 @@
 streamlit
 torch
-opencv-python-headless
 Pillow
-tqdm
-seaborn
+torchvision
 pandas
-ultralytics
