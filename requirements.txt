@@ -3,7 +3,6 @@ torch
 torchvision
 --extra-index-url https://download.pytorch.org/whl/cpu
 ultralytics
-opencv-python-headless==4.8.0.76
 Pillow
 numpy
 pandas
