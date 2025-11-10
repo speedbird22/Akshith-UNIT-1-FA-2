@@ -1,10 +1,10 @@
 import streamlit as st
-import torch
+from ultralytics import YOLO
 from PIL import Image
 import pandas as pd
 
-# Load YOLOv5 model from GitHub
-model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', source='github')
+# Load YOLO model (make sure best.pt is in the same directory or provide full path)
+model = YOLO('best.pt')
 
 # Compliance mapping for 10 classes
 compliance_map = {
@@ -32,11 +32,14 @@ if uploaded_file:
     st.image(image, caption="📷 Uploaded Image", use_column_width=True)
 
     # Run inference
-    results = model(image)
-    detections = results.pandas().xyxy[0]
+    results = model.predict(image, save=False, conf=0.25)
+    detections = results[0].boxes
 
-    if not detections.empty:
-        top = detections.iloc[0]
+    if detections is not None and detections.cls.numel() > 0:
+        names = results[0].names
+        df = detections.pandas().xyxy[0]
+
+        top = df.iloc[0]
         label = top['name']
         conf = round(top['confidence'] * 100, 2)
         category = compliance_map.get(label, 'Unknown')
@@ -53,11 +56,11 @@ if uploaded_file:
 
         # Show full detection table
         st.markdown("### 📋 All Detections")
-        st.dataframe(detections[['name', 'confidence', 'class']])
+        st.dataframe(df[['name', 'confidence', 'class']])
 
         # Compliance summary
         st.markdown("### 📊 Compliance Summary")
-        summary = detections['name'].value_counts().to_dict()
+        summary = df['name'].value_counts().to_dict()
         for cls, count in summary.items():
             label = compliance_map.get(cls, cls)
             st.write(f"- {label}: {count}")
@@ -65,4 +68,4 @@ if uploaded_file:
         st.error("🚫 No PPE-related objects detected. Try another image.")
 
 st.markdown("---")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Built with ❤️ using YOLOv5 and Streamlit</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Built with ❤️ using YOLO and Streamlit</p>", unsafe_allow_html=True)
