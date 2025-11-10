@@ -1,150 +1,60 @@
-# app.py - YOLOv5 + STREAMLIT CLOUD - FINAL WORKING VERSION (Nov 10, 2025)
 import streamlit as st
-from PIL import Image, ImageDraw, ImageFont
-import numpy as np
-import pandas as pd
+from PIL import Image
 import torch
-import os
+import cv2
+import numpy as np
+import tempfile
 
-# === THIS IS THE OFFICIAL ULTRALYTICS WAY TO DISABLE CV2 ===
-os.environ["YOLO_NO_CV2"] = "1"          # <-- THIS LINE IS THE KEY
-import sys
-from pathlib import Path
-import importlib.util
-
-# Block cv2 import gracefully
-def block_cv2():
-    spec = importlib.util.spec_from_loader("cv2", loader=None)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["cv2"] = module
-
-block_cv2()
-
-# === NOW LOAD YOLOv5 SAFELY ===
-@st.cache_resource(show_spinner="Loading your YOLOv5 model...")
+# Load model
+@st.cache_resource
 def load_model():
-    model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', force_reload=False)
-    model.conf = 0.40
-    model.iou = 0.45
-    return model
-
-# Fix NumPy deprecation
-np.object = object
-np.int = int
-np.float = float
-np.bool = bool
-
-st.set_page_config(page_title="YOLOv5 Safety Detector", page_icon="Hard Hat", layout="centered")
-
-st.title("YOLOv5 Safety Compliance Detector")
-st.markdown("**Your trained best.pt works perfectly • Made in India**")
-
-compliance_map = {
-    'Hardhat': 'Compliant',
-    'Safety Vest': 'Compliant',
-    'Mask': 'Compliant',
-    'NO-Hardhat': 'Missing Hardhat',
-    'NO-Safety Vest': 'Missing Vest',
-    'NO-Mask': 'Missing Mask',
-    'Person': 'Worker',
-    'machinery': 'Machinery',
-    'vehicle': 'Vehicle',
-    'Safety Cone': 'Cone'
-}
+    return torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt')
 
 model = load_model()
 
-def is_associated(person_box, gear_box, threshold=0.6):
-    px1, py1, px2, py2 = person_box
-    gx1, gy1, gx2, gy2 = gear_box
-    ix1 = max(px1, gx1)
-    iy1 = max(py1, gy1)
-    ix2 = min(px2, gx2)
-    iy2 = min(py2, gy2)
-    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-    gear_area = (gx2 - gx1) * (gy2 - gy1)
-    return inter / gear_area > threshold if gear_area > 0 else False
+# Compliance map
+compliance_map = {
+    'Hardhat': '✅ Compliant',
+    'Safety Vest': '✅ Compliant',
+    'Mask': '✅ Compliant',
+    'NO-Hardhat': '❌ Missing Hardhat',
+    'NO-Safety Vest': '❌ Missing Vest',
+    'NO-Mask': '❌ Missing Mask',
+    'Person': '👤 Worker',
+    'machinery': '⚙️ Machinery',
+    'vehicle': '🚗 Vehicle',
+    'Safety Cone': '🟠 Cone'
+}
 
-def draw_boxes(image, df):
-    draw = ImageDraw.Draw(image)
-    try:
-        font = ImageFont.truetype("arial.ttf", 28)
-    except:
-        font = ImageFont.load_default()
+# UI
+st.set_page_config(page_title="PPE Compliance Detector", layout="centered")
+st.title("🛠️ PPE Compliance Detection")
+st.markdown("Upload a construction site image to detect workers and check PPE compliance.")
 
-    for _, row in df.iterrows():
-        x1, y1, x2, y2 = int(row.xmin), int(row.ymin), int(row.xmax), int(row.ymax)
-        label = compliance_map.get(row.name, row.name)
-        conf = row.confidence
-        text = f"{label} {conf:.2f}"
-        color = "lime" if "Compliant" in label or "Worker" in label else "red"
-        draw.rectangle([x1, y1, x2, y2], outline=color, width=4)
-        bbox = draw.textbbox((x1, y1-40), text, font=font)
-        draw.rectangle(bbox, fill=color)
-        draw.text((x1+8, y1-40), text, fill="black", font=font)
-    return image
+uploaded_file = st.file_uploader("📷 Upload Image", type=["jpg", "jpeg", "png"])
 
-uploaded_file = st.file_uploader("Upload Construction Site Image", type=["jpg", "jpeg", "png"])
-
-if uploaded_file and model:
+if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+    st.image(image, caption="Original Image", use_column_width=True)
 
-    img_np = np.array(image)
-
-    with st.spinner("Running YOLOv5..."):
-        results = model(img_np, size=640)
+    with st.spinner("Detecting..."):
+        results = model(image)
         df = results.pandas().xyxy[0]
 
-    result_img = draw_boxes(image.copy(), df)
-    st.image(result_img, caption="Detection Results", use_column_width=True)
+        # Annotate image
+        annotated_img = np.array(image)
+        for _, row in df.iterrows():
+            label = row['name']
+            x1, y1, x2, y2 = map(int, [row['xmin'], row['ymin'], row['xmax'], row['ymax']])
+            color = (0, 255, 0) if 'NO-' not in label else (255, 0, 0)
+            cv2.rectangle(annotated_img, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(annotated_img, compliance_map.get(label, label), (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    persons = df[df['name'] == 'Person']
-    st.subheader(f"Workers Detected: {len(persons)}")
+        st.image(annotated_img, caption="🧠 Detection Result", use_column_width=True)
 
-    if len(persons) > 0:
-        st.markdown("### PPE Compliance Report")
-        fully_compliant = 0
-
-        for i, person in enumerate(persons.itertuples(), 1):
-            pbox = (person.xmin, person.ymin, person.xmax, person.ymax)
-            status = {"Hardhat": "Unknown", "Vest": "Unknown", "Mask": "Unknown"}
-
-            gear_map = {
-                'Hardhat': 'NO-Hardhat',
-                'Safety Vest': 'NO-Safety Vest',
-                'Mask': 'NO-Mask'
-            }
-
-            for gear, no_gear in gear_map.items():
-                has = any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) for r in df[df['name'] == gear].itertuples())
-                missing = any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) for r in df[df['name'] == no_gear].itertuples())
-                key = gear.split()[-1]
-                if has:
-                    status[key] = "Compliant"
-                elif missing:
-                    status[key] = f"Missing {key}"
-
-            with st.expander(f"Worker {i}"):
-                st.write(f"Hardhat: **{status['Hardhat']}**")
-                st.write(f"Safety Vest: **{status['Vest']}**")
-                st.write(f"Mask: **{status['Mask']}**")
-
-            if all(v == "Compliant" for v in status.values()):
-                fully_compliant += 1
-
-        if fully_compliant == len(persons):
-            st.balloons()
-        st.success(f"**{fully_compliant}/{len(persons)} workers fully compliant!**")
-
-    others = df[df['name'].isin(['machinery', 'vehicle', 'Safety Cone'])]
-    if not others.empty:
-        st.subheader("Other Objects")
-        for obj in others['name'].unique():
-            count = len(others[others['name'] == obj])
-            st.write(f"{compliance_map.get(obj, '')} {obj}: **{count}**")
-
-else:
-    st.info("Upload an image to start detection")
-
-st.caption("YOLOv5 • No OpenCV • Deployed on Streamlit Cloud • Made in India • Nov 10, 2025")
+        # Summary
+        st.subheader("📋 Compliance Summary")
+        for label in df['name'].unique():
+            count = (df['name'] == label).sum()
+            st.write(f"{compliance_map.get(label, label)}: {count}")
