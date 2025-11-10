@@ -1,10 +1,12 @@
 import streamlit as st
-from ultralytics import YOLO
+import torch
 from PIL import Image
 import pandas as pd
+import torchvision.transforms as T
 
-# Load YOLO model (make sure best.pt is in the same directory or provide full path)
-model = YOLO('best.pt')
+# Load model directly using torch
+model = torch.load('best.pt', map_location='cpu')
+model.eval()
 
 # Compliance mapping for 10 classes
 compliance_map = {
@@ -31,13 +33,32 @@ if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="📷 Uploaded Image", use_column_width=True)
 
-    # Run inference
-    results = model.predict(image, save=False, conf=0.25)
-    detections = results[0].boxes
+    # Preprocess image
+    transform = T.Compose([
+        T.Resize((640, 640)),
+        T.ToTensor()
+    ])
+    input_tensor = transform(image).unsqueeze(0)
 
-    if detections is not None and detections.cls.numel() > 0:
-        names = results[0].names
-        df = detections.pandas().xyxy[0]
+    # Run inference
+    with torch.no_grad():
+        output = model(input_tensor)[0]
+
+    # Postprocess: get class predictions
+    pred = output.cpu()
+    conf_threshold = 0.25
+    detections = pred[pred[:, 4] > conf_threshold]
+
+    if detections.size(0) > 0:
+        class_ids = detections[:, 5].int().tolist()
+        confidences = detections[:, 4].tolist()
+        names = model.names
+
+        df = pd.DataFrame({
+            'name': [names[i] for i in class_ids],
+            'confidence': confidences,
+            'class': class_ids
+        })
 
         top = df.iloc[0]
         label = top['name']
@@ -54,11 +75,9 @@ if uploaded_file:
         else:
             st.info(f"**Category:** {category}")
 
-        # Show full detection table
         st.markdown("### 📋 All Detections")
-        st.dataframe(df[['name', 'confidence', 'class']])
+        st.dataframe(df)
 
-        # Compliance summary
         st.markdown("### 📊 Compliance Summary")
         summary = df['name'].value_counts().to_dict()
         for cls, count in summary.items():
@@ -68,4 +87,4 @@ if uploaded_file:
         st.error("🚫 No PPE-related objects detected. Try another image.")
 
 st.markdown("---")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Built with ❤️ using YOLO and Streamlit</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Built with ❤️ using YOLOv5 and Streamlit</p>", unsafe_allow_html=True)
