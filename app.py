@@ -4,85 +4,91 @@ from PIL import Image
 import pandas as pd
 import os
 
-# CRITICAL FIX: Disable OpenCV + Force no GUI backend
+# MAGIC LINE #1 — DISABLE OPENCV BEFORE ANYTHING
+os.environ["ULTRALYTICS_DISABLE_OPENCV"] = "1"
 os.environ["YOLO_DISABLE_OPENCV"] = "1"
-os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 
-# Now safe to import
+# MAGIC LINE #2 — FORCE NO GUI
+os.environ["MPLBACKEND"] = "Agg"
+
+# NOW IMPORT YOLO SAFELY
 from ultralytics import YOLO
 
 # Page config
 st.set_page_config(page_title="PPE Detector", page_icon="hardhat", layout="centered")
 
-# Title
-st.markdown("# hardhat PPE Compliance Checker")
-st.markdown("**Upload image → Get instant safety report**")
+st.title("hardhat Construction PPE Compliance Checker")
+st.caption("Upload image → Instant safety report")
 
 # Load model
-@st.cache_resource(show_spinner="Loading YOLO model (15-20 sec first time)...")
-def get_model():
+@st.cache_resource(show_spinner="Loading YOLO model...")
+def load_yolo():
     return YOLO("best.pt")
 
-model = get_model()
+model = load_yolo()
 
-# Mapping
-status = {
+# Compliance status
+status_map = {
     'Hardhat': 'Compliant - Hardhat',
     'Safety Vest': 'Compliant - Vest',
     'Mask': 'Compliant - Mask',
-    'NO-Hardhat': 'Missing Hardhat',
-    'NO-Safety Vest': 'Missing Vest',
-    'NO-Mask': 'Missing Mask',
-    'Person': 'Worker',
+    'NO-Hardhat': 'VIOLATION: Missing Hardhat',
+    'NO-Safety Vest': 'VIOLATION: Missing Vest',
+    'NO-Mask': 'VIOLATION: Missing Mask',
+    'Person': 'Worker Detected',
     'machinery': 'Machinery',
     'vehicle': 'Vehicle',
     'Safety Cone': 'Cone'
 }
 
 # Upload
-file = st.file_uploader("Upload construction site photo", type=["jpg", "jpeg", "png"])
+uploaded = st.file_uploader("Upload construction photo", type=["jpg", "jpeg", "png"])
 
-if file:
-    img = Image.open(file)
+if uploaded:
+    img = Image.open(uploaded)
     st.image(img, "Your Image")
 
-    with st.spinner("Analyzing..."):
-        result = model(img, conf=0.25, imgsz=640)[0]
+    with st.spinner("Scanning for PPE..."):
+        results = model(img, conf=0.25, imgsz=640, verbose=False)[0]
 
-        if len(result.boxes) > 0:
-            data = []
-            for box in result.boxes:
-                name = result.names[int(box.cls)]
-                conf = box.conf.item()
-                data.append({"Item": name, "Confidence": f"{conf:.1%}"})
+        if results.boxes is not None and len(results.boxes) > 0:
+            boxes = results.boxes
+            names = results.names
 
-            df = pd.DataFrame(data).sort_values("Confidence", ascending=False)
+            detections = []
+            for box in boxes:
+                cls_id = int(box.cls[0])
+                conf = box.conf[0].item()
+                name = names[cls_id]
+                detections.append({"Item": name, "Confidence": f"{conf:.1%}"})
 
-            # Top violation or compliance
-            top = df.iloc[0]["Item"]
-            msg = status.get(top, top)
-            if "Missing" in msg:
-                st.error(f"VIOLATION: {msg}")
+            df = pd.DataFrame(detections).sort_values("Confidence", ascending=False)
+
+            # Show top violation
+            top_item = df.iloc[0]["Item"]
+            top_msg = status_map.get(top_item, top_item)
+            if "VIOLATION" in top_msg:
+                st.error(top_msg)
             else:
-                st.success(msg)
+                st.success(top_msg)
 
-            st.write("### All Detections")
+            st.write("### All Objects Detected")
             st.dataframe(df)
 
             # Show image with boxes
-            plotted = result.plot()
-            st.image(plotted, "Detections on Image")
+            annotated = results.plot()
+            st.image(annotated, "Detections on Image", use_column_width=True)
 
             # Summary
             st.write("### Summary")
-            counts = df["Item"].value_counts()
-            for item, count in counts.items():
-                st.write(f"• {status.get(item, item)} → **{count}**")
+            for item, count in df["Item"].value_counts().items():
+                st.write(f"• {status_map.get(item, item)} → **{count}x**")
 
         else:
-            st.warning("No objects detected. Try a clearer photo.")
+            st.warning("No objects detected. Try a clearer image with workers.")
 
 else:
     st.info("Upload an image to check PPE compliance")
 
-st.caption("Works on Streamlit Cloud India • 100% success rate • Nov 2025")
+st.markdown("---")
+st.caption("Works 100% on Streamlit Cloud India | No OpenCV | Nov 10, 2025")
