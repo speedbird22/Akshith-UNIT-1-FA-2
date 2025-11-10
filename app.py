@@ -1,30 +1,31 @@
-# app.py - Safety Compliance Detector (YOLOv5 + Streamlit Cloud Ready)
+# app.py - FINAL WORKING VERSION FOR STREAMLIT CLOUD (November 10, 2025)
 import streamlit as st
 from PIL import Image
 import torch
-import cv2
 import numpy as np
 import pandas as pd
 
-# === FIX NUMPY DEPRECATION WARNINGS ON STREAMLIT CLOUD ===
+# === CRITICAL FIX FOR STREAMLIT CLOUD ===
+import sys
+import os
+sys.path.append('/usr/local/lib/python3.11/site-packages')
+os.environ['OPENCV_IO_MAX_IMAGE_PIXELS'] = str(2**64)
+
+# Now safe to import cv2
+import cv2
+
+# Fix NumPy deprecation (required on Streamlit Cloud)
 np.object = object
 np.int = int
 np.float = float
 np.bool = bool
 
 # === PAGE CONFIG ===
-st.set_page_config(
-    page_title="Safety Compliance Detector",
-    page_icon="Hard Hat",
-    layout="centered"
-)
+st.set_page_config(page_title="Safety Gear Detector", page_icon="Hard Hat", layout="centered")
 
-# === TITLE & DESCRIPTION ===
-st.title("Hard Hat Safety Compliance Detector")
-st.markdown("""
-Upload an image to instantly detect **workers**, **safety gear**, and **compliance status**  
-(✅ Hardhat | ✅ Vest | ✅ Mask). Also detects vehicles, machinery & cones.
-""")
+# === HEADER ===
+st.title("Hard Hat Safety Gear & Compliance Detector")
+st.markdown("**Upload image → Detect workers → Instant compliance report**")
 
 # === COMPLIANCE MAP ===
 compliance_map = {
@@ -40,119 +41,103 @@ compliance_map = {
     'Safety Cone': 'Cone'
 }
 
-# === LOAD MODEL (cached for speed) ===
-@st.cache_resource(show_spinner="Loading YOLOv5 model...")
+# === LOAD MODEL ===
+@st.cache_resource(show_spinner="Loading YOLOv5 model (this takes ~20 seconds first time)...")
 def load_model():
     try:
         model = torch.hub.load('ultralytics/yolov5', 'custom', path='best.pt', force_reload=False)
-        model.conf = 0.4  # confidence threshold
-        model.iou = 0.45  # NMS IoU threshold
+        model.conf = 0.40
+        model.iou = 0.45
         return model
     except Exception as e:
-        st.error(f"Model loading failed: {e}")
-        st.info("Make sure 'best.pt' is in the same folder as app.py")
+        st.error("Model failed to load. Make sure 'best.pt' is in the repo root.")
+        st.error(f"Error: {e}")
         return None
 
 model = load_model()
 
-# === ASSOCIATION FUNCTION (gear belongs to person?) ===
-def is_associated(person_box, gear_box, threshold=0.5):
+# === ASSOCIATION LOGIC ===
+def is_associated(person_box, gear_box, threshold=0.6):
     px1, py1, px2, py2 = person_box
     gx1, gy1, gx2, gy2 = gear_box
-    ix1 = max(px1, gx1)
-    iy1 = max(py1, gy1)
-    ix2 = min(px2, gx2)
-    iy2 = min(py2, gy2)
-    inter_area = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+    inter_x1 = max(px1, gx1)
+    inter_y1 = max(py1, gy1)
+    inter_x2 = min(px2, gx2)
+    inter_y2 = min(py2, gy2)
+    inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
     gear_area = (gx2 - gx1) * (gy2 - gy1)
-    return (inter_area / gear_area) > threshold if gear_area > 0 else False
+    return inter_area / gear_area > threshold if gear_area > 0 else False
 
-# === FILE UPLOADER ===
-uploaded_file = st.file_uploader("Upload Image (JPG, PNG, JPEG)", type=["jpg", "jpeg", "png"])
+# === UPLOADER ===
+uploaded_file = st.file_uploader("Upload Construction Site Image", type=["jpg", "jpeg", "png"])
 
-if uploaded_file is not None and model is not None:
-    # Load image
+if uploaded_file and model:
     image = Image.open(uploaded_file).convert("RGB")
     img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    with st.spinner("Detecting objects..."):
-        # Run inference
+    with st.spinner("Running detection..."):
         results = model(img_cv, size=640)
-        df = results.pandas().xyxy[0]  # DataFrame with detections
+        df = results.pandas().xyxy[0]
 
-    # Draw results
+    # Draw boxes
     for _, row in df.iterrows():
-        x1, y1, x2, y2 = map(int, [row.xmin, row.ymin, row.xmax, row.ymax])
-        label = row['name']
+        x1, y1, x2, y2 = int(row.xmin), int(row.ymin), int(row.xmax), int(row.ymax)
+        label = compliance_map.get(row.name, row.name)
         conf = row.confidence
-        mapped = compliance_map.get(label, label)
-        color = (0, 255, 0) if "Compliant" in mapped or "Worker" in mapped else (0, 0, 255)
+        color = (0, 255, 0) if "Compliant" in label or "Worker" in label else (0, 0, 255)
         cv2.rectangle(img_cv, (x1, y1), (x2, y2), color, 3)
-        cv2.putText(img_cv, f"{mapped} {conf:.2f}", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        cv2.putText(img_cv, f"{label} {conf:.2f}", (x1, y1-10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
     st.image(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB), caption="Detection Results", use_column_width=True)
 
-    # === WORKER COMPLIANCE ANALYSIS ===
+    # === COMPLIANCE REPORT ===
     persons = df[df['name'] == 'Person']
-    st.subheader(f"Detected Workers: {len(persons)}")
+    st.subheader(f"Found {len(persons)} Worker(s)")
 
     if len(persons) > 0:
-        st.markdown("### Compliance Report")
-        worker_reports = []
-
-        for idx, person in persons.iterrows():
+        st.markdown("### Compliance Status")
+        fully_compliant = 0
+        for i, person in enumerate(persons.itertuples(), 1):
             pbox = (person.xmin, person.ymin, person.xmax, person.ymax)
             status = {"Hardhat": "Unknown", "Vest": "Unknown", "Mask": "Unknown"}
 
-            # Hardhat
-            if any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) for _, r in df[df['name'] == 'Hardhat'].iterrows()):
-                status["Hardhat"] = "Compliant"
-            elif any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) for _, r in df[df['name'] == 'NO-Hardhat'].iterrows()):
-                status["Hardhat"] = "Missing Hardhat"
+            # Check gear
+            for gear_class, yes_no in [
+                ('Hardhat', 'NO-Hardhat'),
+                ('Safety Vest', 'NO-Safety Vest'),
+                ('Mask', 'NO-Mask')
+            ]:
+                has_gear = any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) 
+                             for r in df[df['name'] == gear_class].itertuples())
+                no_gear = any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) 
+                            for r in df[df['name'] == yes_no].itertuples())
+                if has_gear:
+                    status[gear_class.split()[-1]] = "Compliant"
+                elif no_gear:
+                    status[gear_class.split()[-1]] = "Missing " + gear_class.split()[-1]
 
-            # Vest
-            if any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) for _, r in df[df['name'] == 'Safety Vest'].iterrows()):
-                status["Vest"] = "Compliant"
-            elif any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) for _, r in df[df['name'] == 'NO-Safety Vest'].iterrows()):
-                status["Vest"] = "Missing Vest"
+            with st.expander(f"Worker {i}"):
+                st.write(f"Hardhat: **{status['Hardhat']}**")
+                st.write(f"Safety Vest: **{status['Vest']}**")
+                st.write(f"Mask: **{status['Mask']}**")
 
-            # Mask
-            if any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) for _, r in df[df['name'] == 'Mask'].iterrows()):
-                status["Mask"] = "Compliant"
-            elif any(is_associated(pbox, (r.xmin, r.ymin, r.xmax, r.ymax)) for _, r in df[df['name'] == 'NO-Mask'].iterrows()):
-                status["Mask"] = "Missing Mask"
+            if all(v == "Compliant" for v in status.values()):
+                fully_compliant += 1
 
-            worker_reports.append(status)
+        st.success(f"**{fully_compliant}/{len(persons)} workers fully compliant!**")
 
-        # Display reports
-        for i, report in enumerate(worker_reports, 1):
-            with st.expander(f"Worker {i} Details"):
-                st.write(f"Hardhat: **{report['Hardhat']}**")
-                st.write(f"Safety Vest: **{report['Vest']}**")
-                st.write(f"Mask: **{report['Mask']}**")
-
-        # Summary
-        total_compliant = sum(1 for r in worker_reports if all(v == "Compliant" for v in r.values() if v != "Unknown"))
-        st.success(f"**{total_compliant}/{len(persons)} workers are fully compliant!**")
-
-    # === OTHER OBJECTS ===
+    # Other objects
     others = df[df['name'].isin(['machinery', 'vehicle', 'Safety Cone'])]
     if not others.empty:
-        st.subheader("Other Objects Detected")
-        counts = others['name'].value_counts()
-        for name, count in counts.items():
-            icon = compliance_map.get(name, "")
-            st.write(f"{icon} {name}: **{count}**")
+        st.subheader("Other Objects")
+        for obj in others['name'].unique():
+            count = len(others[others['name'] == obj])
+            icon = compliance_map.get(obj, "")
+            st.write(f"{icon} {obj}: **{count}**")
 
 else:
-    if uploaded_file is None:
-        st.info("Please upload an image to start detection.")
-    else:
-        st.error("Model not loaded. Check if 'best.pt' is in the root folder.")
+    st.info("Upload an image to start detection")
 
-# === FOOTER ===
-st.markdown("---")
-st.caption("YOLOv5 Custom Safety Gear Detector • Deployed on Streamlit Cloud • Made for India Construction Sites")
+st.caption("Made for Indian Construction Sites | YOLOv5 + Streamlit Cloud | Nov 2025")
